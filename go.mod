@@ -1,4 +1,4 @@
-module github.com/mfojtik/controller-sdk
+module github.com/mfojtik/controller-factory
 
 go 1.13
 

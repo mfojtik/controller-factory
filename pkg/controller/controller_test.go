@@ -40,10 +40,16 @@ func NewFakeController(t *testing.T, synced chan struct{}, secretsInformer v12.S
 func (f *FakeController) Sync(ctx context.Context, controllerContext Context) error {
 	defer close(f.synced)
 	if ctx.Err() != nil {
-		f.t.Logf("context %v", ctx.Err())
+		f.t.Logf("ctx %v", ctx.Err())
 		return ctx.Err()
 	}
-	f.t.Logf("controller %s sync called", controllerContext.Name)
+	if controllerContext.GetObjectMeta().GetName() != "test-secret" {
+		f.t.Errorf("expected controller context to give secret name 'test-secret', got %q", controllerContext.GetObjectMeta().GetName())
+	}
+	if _, ok := controllerContext.GetQueueObject().(*v1.Secret); !ok {
+		f.t.Errorf("expected Secret object, got %+v", controllerContext.GetQueueObject())
+	}
+	f.t.Logf("controller %s sync called", controllerContext.ControllerName())
 	return nil
 }
 
@@ -83,7 +89,7 @@ func TestSimpleController(t *testing.T) {
 	controllerSynced := make(chan struct{})
 	controller := factory.Sync(func(ctx context.Context, controllerContext Context) error {
 		defer close(controllerSynced)
-		t.Logf("controller %s sync called", controllerContext.Name)
+		t.Logf("controller %s sync called", controllerContext.ControllerName())
 		return nil
 	}).Controller("FakeController", events.NewInMemoryRecorder("fake-controller"))
 

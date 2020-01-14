@@ -10,8 +10,8 @@ import (
 )
 
 // SyncFunc is a function that contain main controller logic.
-// The context.Context passed is the main controller context, when cancelled it means the controller is being shut down.
-// The controllerContext provides access to controller name, queue and event recorder.
+// The ctx.ctx passed is the main controller ctx, when cancelled it means the controller is being shut down.
+// The ctx provides access to controller name, queue and event recorder.
 type SyncFunc func(ctx context.Context, controllerContext Context) error
 
 // Factory is generator that generate standard Kubernetes controllers.
@@ -49,14 +49,14 @@ func (f *Factory) Controller(name string, eventRecorder events.Recorder) Control
 	}
 	c := &baseController{
 		sync: f.sync,
-		controllerContext: Context{
-			Name:          name,
-			EventRecorder: eventRecorder.WithComponentSuffix(name),
-			Queue:         workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), name),
+		ctx: controllerContext{
+			controllerName: name,
+			eventRecorder:  eventRecorder.WithComponentSuffix(name),
+			queue:          workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), name),
 		},
 	}
 	for i := range f.informers {
-		f.informers[i].AddEventHandler(c.controllerContext.getEventHandler())
+		f.informers[i].AddEventHandler(c.ctx.getEventHandler())
 		c.cachesToSync = append(f.cachesToSync, f.informers[i].HasSynced)
 	}
 	return c

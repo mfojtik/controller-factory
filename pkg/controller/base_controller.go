@@ -3,8 +3,10 @@ package controller
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
+	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/cache"
@@ -13,49 +15,78 @@ import (
 
 // baseController represents generic Kubernetes controller boiler-plate
 type baseController struct {
-	cachesToSync      []cache.InformerSynced
-	sync              func(ctx context.Context, controllerContext Context) error
-	controllerContext Context
+	cachesToSync    []cache.InformerSynced
+	sync            func(ctx context.Context, controllerContext Context) error
+	ctx             controllerContext
+	shutdownContext context.Context
 }
 
-func (b *baseController) Run(ctx context.Context, workers int) {
-	defer utilruntime.HandleCrash()
-	defer b.controllerContext.Queue.ShutDown()
-	defer klog.Infof("Shutting down %s ...", b.controllerContext.Name)
+var _ Controller = &baseController{}
 
-	klog.Infof("Starting %s ...", b.controllerContext.Name)
-	if !cache.WaitForCacheSync(ctx.Done(), b.cachesToSync...) {
+func (c *baseController) Run(ctx context.Context, workers int) {
+	shutdownContext, shutdownComplete := context.WithCancel(context.Background())
+	c.shutdownContext = shutdownContext
+
+	defer shutdownComplete()
+	defer utilruntime.HandleCrash()
+	defer c.ctx.Queue().ShutDown()
+	defer klog.Infof("Shutting down %s ...", c.ctx.ControllerName())
+
+	klog.Infof("Starting %s ...", c.ctx.ControllerName())
+	if !cache.WaitForCacheSync(ctx.Done(), c.cachesToSync...) {
 		return
 	}
+	klog.V(5).Infof("Caches synced for controller %s", c.ctx.ControllerName())
 
-	// doesn't matter what workers say, only start one.
+	var workerWaitGroup sync.WaitGroup
+
 	for i := 1; i <= workers; i++ {
-		klog.Infof("Starting #%d worker of %s controller ...", i, b.controllerContext.Name)
-		go wait.UntilWithContext(ctx, b.runWorker, time.Second)
+		klog.Infof("Starting #%d worker of %s controller ...", i, c.ctx.ControllerName())
+		workerWaitGroup.Add(1)
+		go wait.UntilWithContext(ctx, func(ctx context.Context) {
+			defer workerWaitGroup.Done()
+			defer klog.Infof("Shutting down worker of %s controller ...", c.ctx.ControllerName())
+			c.runWorker(ctx)
+		}, time.Second)
 	}
 
+	// wait for controller shutdown to be requested
 	<-ctx.Done()
+
+	// wait for all workers to finish their jobs
+	workerWaitGroup.Wait()
 }
 
-func (b *baseController) runWorker(ctx context.Context) {
-	for b.processNextWorkItem(ctx) {
+func (c *baseController) ShutdownContext() context.Context {
+	return c.shutdownContext
+}
+
+func (c *baseController) runWorker(ctx context.Context) {
+	for c.processNextWorkItem(ctx) {
 	}
 }
 
-func (b *baseController) processNextWorkItem(ctx context.Context) bool {
-	dsKey, quit := b.controllerContext.Queue.Get()
+func (c *baseController) processNextWorkItem(ctx context.Context) bool {
+	syncObject, quit := c.ctx.Queue().Get()
 	if quit || ctx.Err() != nil {
 		return false
 	}
 
-	defer b.controllerContext.Queue.Done(dsKey)
+	runtimeObj, ok := syncObject.(runtime.Object)
+	if !ok {
+		utilruntime.HandleError(fmt.Errorf("object is not runtime Object: %+v", syncObject))
+		c.ctx.Queue().Forget(syncObject)
+		return true
+	}
 
-	if err := b.sync(ctx, b.controllerContext); err != nil {
-		utilruntime.HandleError(fmt.Errorf("%v failed with : %v", dsKey, err))
-		if !b.controllerContext.Queue.ShuttingDown() && ctx.Err() == nil {
-			b.controllerContext.Queue.AddRateLimited(dsKey)
+	defer c.ctx.Queue().Done(runtimeObj)
+
+	if err := c.sync(ctx, c.ctx.withQueueObject(runtimeObj)); err != nil {
+		utilruntime.HandleError(fmt.Errorf("%v failed with : %v", syncObject, err))
+		if !c.ctx.Queue().ShuttingDown() && ctx.Err() == nil {
+			c.ctx.Queue().AddRateLimited(runtimeObj)
 		}
 	}
-	b.controllerContext.Queue.Forget(dsKey)
+	c.ctx.Queue().Forget(runtimeObj)
 	return true
 }
