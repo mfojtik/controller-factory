@@ -17,6 +17,7 @@ import (
 type baseController struct {
 	cachesToSync    []cache.InformerSynced
 	sync            func(ctx context.Context, controllerContext Context) error
+	resyncEvery     time.Duration
 	ctx             controllerContext
 	shutdownContext context.Context
 }
@@ -25,6 +26,9 @@ var _ Controller = &baseController{}
 
 func (c *baseController) Run(ctx context.Context, workers int) {
 	shutdownContext, shutdownComplete := context.WithCancel(context.Background())
+	if c.shutdownContext != nil {
+		panic(fmt.Sprintf("controller %q is already running", c.ctx.ControllerName()))
+	}
 	c.shutdownContext = shutdownContext
 
 	defer shutdownComplete()
@@ -50,6 +54,9 @@ func (c *baseController) Run(ctx context.Context, workers int) {
 		}, time.Second)
 	}
 
+	// if periodical resync is requested, run it.
+	go c.runPeriodicalResync(ctx, c.resyncEvery)
+
 	// wait for controller shutdown to be requested
 	<-ctx.Done()
 
@@ -59,6 +66,17 @@ func (c *baseController) Run(ctx context.Context, workers int) {
 
 func (c *baseController) ShutdownContext() context.Context {
 	return c.shutdownContext
+}
+
+func (c *baseController) runPeriodicalResync(ctx context.Context, interval time.Duration) {
+	if interval == 0 {
+		return
+	}
+	go wait.UntilWithContext(ctx, func(ctx context.Context) {
+		if err := c.sync(ctx, c.ctx.withQueueObject(nil)); err != nil {
+			utilruntime.HandleError(fmt.Errorf("periodical resync of controller %s failed: %v", c.ctx.ControllerName(), err))
+		}
+	}, interval)
 }
 
 func (c *baseController) runWorker(ctx context.Context) {
@@ -82,11 +100,11 @@ func (c *baseController) processNextWorkItem(ctx context.Context) bool {
 	defer c.ctx.Queue().Done(runtimeObj)
 
 	if err := c.sync(ctx, c.ctx.withQueueObject(runtimeObj)); err != nil {
-		utilruntime.HandleError(fmt.Errorf("%v failed with : %v", syncObject, err))
-		if !c.ctx.Queue().ShuttingDown() && ctx.Err() == nil {
-			c.ctx.Queue().AddRateLimited(runtimeObj)
-		}
+		utilruntime.HandleError(fmt.Errorf("%s controller failed to sync %+v with: %w", c.ctx.ControllerName(), syncObject, err))
+		c.ctx.Queue().AddRateLimited(runtimeObj)
+	} else {
+		c.ctx.Queue().Forget(runtimeObj)
 	}
-	c.ctx.Queue().Forget(runtimeObj)
+
 	return true
 }

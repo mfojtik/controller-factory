@@ -77,6 +77,56 @@ func TestEmbeddedController(t *testing.T) {
 	}
 }
 
+func TestResyncController(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.TODO())
+	factory := NewFactory().ResyncEvery(1 * time.Second)
+
+	controllerSynced := make(chan struct{})
+	controller := factory.Sync(func(ctx context.Context, controllerContext Context) error {
+		defer close(controllerSynced)
+		t.Logf("controller %s sync called", controllerContext.ControllerName())
+		return nil
+	}).Controller("PeriodicController", events.NewInMemoryRecorder("periodic-controller"))
+
+	go controller.Run(ctx, 1)
+
+	select {
+	case <-controllerSynced:
+		cancel()
+	case <-time.After(30 * time.Second):
+		t.Fatal("test timeout")
+	}
+}
+
+func TestControllerShutdown(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.TODO())
+	factory := NewFactory().ResyncEvery(1 * time.Second)
+	syncShutdownRegistered := false
+
+	// simulate a long running sync logic that is signalled to shutdown
+	controller := factory.Sync(func(ctx context.Context, controllerContext Context) error {
+		t.Logf("starting sync()")
+		select {
+		case <-ctx.Done():
+			syncShutdownRegistered = true
+		}
+		return nil
+	}).Controller("ShutdownController", events.NewInMemoryRecorder("shutdown-controller"))
+
+	go controller.Run(ctx, 1)
+
+	time.Sleep(3 * time.Second) // give it time to periodically resync and call the sync() function
+	t.Logf("signalling controller to shutdown")
+
+	cancel()
+	time.Sleep(1 * time.Second)
+
+	if !syncShutdownRegistered {
+		t.Fatalf("expected to register the controller shutdown")
+	}
+
+}
+
 func TestSimpleController(t *testing.T) {
 	kubeClient := fake.NewSimpleClientset()
 
