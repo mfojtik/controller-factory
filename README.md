@@ -1,3 +1,5 @@
+[![GoDoc](https://godoc.org/github.com/mfojtik/controller-factory/pkg/controller?status.svg)](https://godoc.org/github.com/mfojtik/controller-factory/pkg/controller)
+
 # controller-factory
 
 This is a prototype for a generic [Kubernetes](https://github.com/kubernetes/kubernetes) controller generator that wraps all the boiler plate and let you
