@@ -72,7 +72,7 @@ func TestEmbeddedController(t *testing.T) {
 	select {
 	case <-controllerSynced:
 		cancel()
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("test timeout")
 	}
 }
@@ -102,7 +102,7 @@ func TestSimpleController(t *testing.T) {
 	select {
 	case <-controllerSynced:
 		cancel()
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("test timeout")
 	}
 }
