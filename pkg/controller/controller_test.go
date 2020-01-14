@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -102,13 +103,16 @@ func TestControllerShutdown(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.TODO())
 	factory := NewFactory().ResyncEvery(1 * time.Second)
 	syncShutdownRegistered := false
+	var syncShutdownRegisteredLock sync.Mutex
 
 	// simulate a long running sync logic that is signalled to shutdown
 	controller := factory.Sync(func(ctx context.Context, controllerContext Context) error {
 		t.Logf("starting sync()")
 		select {
 		case <-ctx.Done():
+			syncShutdownRegisteredLock.Lock()
 			syncShutdownRegistered = true
+			syncShutdownRegisteredLock.Unlock()
 		}
 		return nil
 	}).Controller("ShutdownController", events.NewInMemoryRecorder("shutdown-controller"))
@@ -121,6 +125,8 @@ func TestControllerShutdown(t *testing.T) {
 	cancel()
 	time.Sleep(1 * time.Second)
 
+	syncShutdownRegisteredLock.Lock()
+	defer syncShutdownRegisteredLock.Unlock()
 	if !syncShutdownRegistered {
 		t.Fatalf("expected to register the controller shutdown")
 	}
