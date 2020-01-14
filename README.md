@@ -17,11 +17,11 @@ type SampleController struct {}
 
 func NewController(secretsInformer v1.SecretInformer) Controller {
     // Multiple informers can be registered here, they all get proper event handlers.
-	factory := NewFactory().Informers(secretsInformer.Informer())
-	controller := &SampleController{}
+    factory := NewFactory().Informers(secretsInformer.Informer())
+    controller := &SampleController{}
 
     // The "Sync()" function must be called prior to producing the Controller().
-	return factory.Sync(controller.Sync).Controller("SampleController", events.NewInMemoryRecorder("sample-controller"))
+    return factory.Sync(controller.Sync).Controller("SampleController", events.NewInMemoryRecorder("sample-controller"))
 }
 
 func (f *SampleController) Sync(ctx context.Context, controllerContext Context) error {
