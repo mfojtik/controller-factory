@@ -1,8 +1,16 @@
 # controller-factory
 
 This is a prototype for a generic [Kubernetes](https://github.com/kubernetes/kubernetes) controller generator that wraps all the boiler plate and let you
-focus straight on the main synchronization logic.
-The result is very simple controller that reacts to resource changes from passed informers.
+focus straight on the main synchronization logic (the `Sync()` function). 
+
+The boiler plate used by this generator will provide:
+
+* Proper handling of controller shutdown (terminating all workers, signalling to Sync(), etc..)
+* Automatic registration of event handlers to all informers
+* Automatic wait for cache sync for every informer
+* Single work queue mechanism and context for `Sync()` function that provide object metadata
+
+The result is very simple Kubernetes controller that reacts to resource changes from passed informers or resync periodically if `.ResyncEvery()` is used.
 In many cases this is enough, like writing a simple operator controller loop, but in some cases it is not, such as:
 
 * If you need to handle Create, Update or Delete events differently - this is not for you
@@ -17,6 +25,7 @@ type SampleController struct {}
 
 func NewController(secretsInformer v1.SecretInformer) Controller {
     // Multiple informers can be registered here, they all get proper event handlers.
+    // Note that you can also use .ResyncEvery(duration) to call Sync() periodically, regardless of informers.
     factory := NewFactory().Informers(secretsInformer.Informer())
     controller := &SampleController{}
 
